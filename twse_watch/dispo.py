@@ -61,7 +61,8 @@ def assess(code: str, today_is_attention: Optional[bool]) -> DispositionView:
     today = _dt.date.today()
 
     disps = src.fetch_official_disposition(code)
-    ongoing = [d for d in disps if d.end and d.end >= today]
+    # end 為 None 表示日期解析失敗，保守視為仍在處置中
+    ongoing = [d for d in disps if d.end is None or d.end >= today]
     if ongoing:
         d = max(ongoing, key=lambda x: x.end or today)
         return DispositionView(

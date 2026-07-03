@@ -21,6 +21,7 @@ TWSE_BWIBBU = "https://www.twse.com.tw/rwd/zh/afterTrading/BWIBBU"          # �
 TWSE_T187 = "https://openapi.twse.com.tw/v1/opendata/t187ap03_L"            # 上市公司基本資料(含已發行股數)
 TWSE_NOTE = "https://openapi.twse.com.tw/v1/announcement/notetrans"         # 注意
 TWSE_PUNISH = "https://openapi.twse.com.tw/v1/announcement/punish"          # 處置
+TWSE_PUNISH_RWD = "https://www.twse.com.tw/rwd/zh/announcement/punish"      # 處置(即時 RWD，優先)
 
 TPEX_QUOTES = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes"            # 上櫃當日報價快照
 TPEX_PE = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis"      # 上櫃本益比/淨值比
@@ -349,33 +350,79 @@ class OfficialAttention:
     criteria_text: str     # 例如 '115年6月16日至115年6月29日等九個營業日已有五次'
 
 
+def _parse_disposition_period(period: str):
+    """解析處置期間字串 → (start, end)。
+    支援 '115/06/26～115/07/10'、'115年06月26日至115年07月10日' 等格式。
+    若無法解析 end，設為 today+90 以確保 ongoing 過濾不遺漏。
+    """
+    start = end = None
+    parts = re.split(r"[~～至\-－]", period)
+    if len(parts) >= 2:
+        start = roc_to_date(parts[0].strip())
+        end = roc_to_date(parts[-1].strip())
+    elif len(parts) == 1 and parts[0].strip():
+        start = roc_to_date(parts[0].strip())
+    # 若 end 解析失敗但有 start，保守設為 today+90，避免遺漏進行中處置
+    if start and end is None:
+        end = _dt.date.today() + _dt.timedelta(days=90)
+    return start, end
+
+
 def fetch_official_disposition(code: str) -> list:
     res = []
-    # TWSE
+    seen_periods: set = set()
+
+    def _add_twse_row(row):
+        period = row.get("DispositionPeriod", "")
+        if period in seen_periods:
+            return
+        seen_periods.add(period)
+        start, end = _parse_disposition_period(period)
+        res.append(OfficialDisposition(
+            code=code, name=row.get("Name", ""),
+            reason=row.get("ReasonsOfDisposition", ""),
+            period=period, measures=row.get("DispositionMeasures", ""),
+            detail=row.get("Detail", ""), start=start, end=end))
+
+    # 主：即時 RWD（更新較快）
+    try:
+        d = _dt.date.today().strftime("%Y%m%d")
+        rwd = requests.get(TWSE_PUNISH_RWD,
+                           params={"date": d, "response": "json"},
+                           headers={"User-Agent": "Mozilla/5.0"}, timeout=20).json()
+        for row in rwd.get("data", []):
+            # RWD data 是 list：[代號, 名稱, 原因, 期間, 措施, ...]
+            if len(row) >= 5 and str(row[0]).strip() == code:
+                period = str(row[3])
+                if period in seen_periods:
+                    continue
+                seen_periods.add(period)
+                start, end = _parse_disposition_period(period)
+                res.append(OfficialDisposition(
+                    code=code, name=str(row[1]),
+                    reason=str(row[2]), period=period,
+                    measures=str(row[4]), detail="",
+                    start=start, end=end))
+    except Exception:
+        pass
+
+    # 後備：OpenAPI（有延遲但欄位明確）
     try:
         for row in _get_json(TWSE_PUNISH):
             if row.get("Code") == code:
-                period = row.get("DispositionPeriod", "")
-                start = end = None
-                m = re.split(r"[~～]", period)
-                if len(m) == 2:
-                    start, end = roc_to_date(m[0]), roc_to_date(m[1])
-                res.append(OfficialDisposition(
-                    code=code, name=row.get("Name", ""),
-                    reason=row.get("ReasonsOfDisposition", ""),
-                    period=period, measures=row.get("DispositionMeasures", ""),
-                    detail=row.get("Detail", ""), start=start, end=end))
+                _add_twse_row(row)
     except Exception:
         pass
+
     # TPEx
     try:
         for row in _get_json(TPEX_DISPOSAL):
             if row.get("SecuritiesCompanyCode") == code:
                 period = row.get("DispositionPeriod", "")
-                start = end = None
-                m = re.split(r"[~～]", period)
-                if len(m) == 2:
-                    start, end = roc_to_date(m[0]), roc_to_date(m[1])
+                if period in seen_periods:
+                    continue
+                seen_periods.add(period)
+                start, end = _parse_disposition_period(period)
                 res.append(OfficialDisposition(
                     code=code, name=row.get("CompanyName", ""),
                     reason=row.get("DispositionReasons", ""),
