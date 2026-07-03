@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>台股注意／處置 進度查詢 v0.6</title>
+<style>
+  :root{--bg:#0f1115;--card:#1a1d24;--card2:#212530;--bd:#2a2e37;--tx:#e6e8ec;--mut:#9aa0aa;
+        --red:#ff5d5d;--amber:#ffb13d;--green:#36c98a;--blue:#5aa9ff;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--tx);font-family:-apple-system,"Segoe UI","Noto Sans TC",sans-serif;line-height:1.6}
+  .wrap{max-width:900px;margin:0 auto;padding:26px 18px 80px}
+  h1{font-size:21px;margin:0 0 4px} .sub{color:var(--mut);font-size:13px;margin-bottom:18px}
+  .bar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px}
+  input,button,select{font-size:16px;border-radius:10px;border:1px solid var(--bd);background:var(--card);color:var(--tx);padding:11px 14px}
+  input{flex:1;min-width:140px} button{cursor:pointer;background:var(--blue);color:#06121f;font-weight:700;border:none} button:disabled{opacity:.5;cursor:wait}
+  .examples{font-size:12px;color:var(--mut);margin:-6px 0 16px} .examples a{color:var(--blue);text-decoration:none;margin-right:12px;cursor:pointer}
+  .card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px 18px;margin-bottom:14px}
+  .head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .tag{font-size:12px;padding:3px 9px;border-radius:999px;font-weight:700}
+  .t-red{background:rgba(255,93,93,.16);color:var(--red)} .t-amber{background:rgba(255,177,61,.16);color:var(--amber)}
+  .t-green{background:rgba(54,201,138,.16);color:var(--green)} .t-mut{background:rgba(154,160,170,.16);color:var(--mut)}
+  .hero{background:linear-gradient(180deg,#20242f,#1a1d24);border:1px solid var(--bd);border-radius:16px;padding:18px;margin-bottom:16px}
+  .hero h2{font-size:13px;letter-spacing:.08em;color:var(--mut);margin:0 0 12px;text-transform:uppercase}
+  .nums{display:flex;gap:26px;flex-wrap:wrap;margin-bottom:6px}
+  .nb .bignum{font-size:32px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1}
+  .nb .lab{color:var(--mut);font-size:12px}
+  .rules{margin-top:14px;display:grid;gap:9px}
+  .rule{display:grid;grid-template-columns:140px 1fr auto;gap:10px;align-items:center;font-size:13px}
+  .rule .lbl{color:var(--mut)}
+  .track{height:8px;background:#11141a;border-radius:6px;overflow:hidden;border:1px solid var(--bd)}
+  .fill{height:100%;border-radius:6px} .rem{font-variant-numeric:tabular-nums;font-weight:700;min-width:60px;text-align:right}
+  .proj{margin-top:13px;padding:11px 12px;border-radius:10px;background:var(--card2);font-size:13px}
+  .proj.warn{background:rgba(255,93,93,.10);border:1px solid rgba(255,93,93,.35)}
+  .timeline{display:flex;gap:4px;flex-wrap:wrap;margin-top:12px}
+  .day{font-size:10.5px;text-align:center;border:1px solid var(--bd);border-radius:7px;padding:5px 6px;min-width:52px;background:#11141a}
+  .day.an{border-color:rgba(255,93,93,.5);background:rgba(255,93,93,.10)}
+  .day .d{color:var(--mut)} .day .k{color:var(--red);font-weight:700;margin-top:2px;min-height:14px}
+  .caveat{margin-top:12px;font-size:12px;color:var(--amber)}
+  .stage-title{font-size:12px;letter-spacing:.08em;color:var(--mut);text-transform:uppercase;margin:22px 0 8px;font-weight:700}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:6px}
+  td,th{border-bottom:1px solid var(--bd);padding:7px 6px;text-align:left;vertical-align:top}
+  th{color:var(--mut);font-weight:600}
+  .crit-trig{color:var(--red);font-weight:700} .crit-no{color:var(--mut)} .crit-data{color:#6b7180}
+  .sc-note{color:var(--mut);font-size:12.5px}
+  .pill{display:inline-block;font-size:11px;padding:1px 7px;border-radius:6px;margin-left:6px}
+  .reach-y{background:rgba(255,93,93,.16);color:var(--red)} .reach-n{background:rgba(54,201,138,.16);color:var(--green)} .reach-v{background:rgba(90,169,255,.16);color:var(--blue)}
+  .disc{color:#7a8088;font-size:12px;margin-top:18px} .warn{color:var(--amber);font-size:13px;margin-top:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>台股注意／處置 進度查詢 <span style="font-size:12px;color:var(--mut)">v0.6 含自算序列</span></h1>
+  <div class="sub">最上方「處置進度」直接顯示：自算累積第幾次／連續幾日、距各處置門檻、明日是否進處置。</div>
+  <div class="bar">
+    <input id="code" placeholder="股票代號，例如 2375" inputmode="numeric" />
+    <select id="months"><option value="4">近4月</option><option value="6" selected>近6月</option></select>
+    <button id="go">查詢</button>
+  </div>
+  <div class="examples">範例：
+    <a data-c="2375">2375 凱美</a><a data-c="1444">1444 力麗</a><a data-c="2302">2302 麗正</a><a data-c="2330">2330 台積電</a>
+  </div>
+  <div id="out"></div>
+</div>
+<script>
+const $=s=>document.querySelector(s); const out=$("#out");
+const NAMES={k1:"款1",k2:"款2",k3:"款3",k4:"款4",k5:"款5",k6:"款6",k7:"款7",k8:"款8",k9:"款9",k10:"款10",k11:"款11",k12:"款12",k13:"款13"};
+function esc(s){return (s??"").toString().replace(/[&<>]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[m]));}
+function tag(st){const m={DISPOSED:["處置中／將處置","t-red"],WATCH:["注意觀察","t-amber"],CLEAR:["目前未列","t-green"],NO_DATA:["無資料","t-mut"],ERROR:["錯誤","t-red"]};const [t,c]=m[st]||[st,"t-mut"];return `<span class="tag ${c}">${t}</span>`;}
+
+async function query(code){
+  if(!code)return; $("#go").disabled=true;
+  out.innerHTML=`<div class="card">查詢中… 首次需 10–20 秒（逐月抓日成交＋當沖明細＋回算30日序列）。</div>`;
+  try{const r=await fetch(`/api/query?code=${encodeURIComponent(code)}&months=${$("#months").value}`);render(await r.json());}
+  catch(e){out.innerHTML=`<div class="card">連線失敗：${esc(e.message)}</div>`;}
+  $("#go").disabled=false;
+}
+function ruleRow(label,have,need){
+  const remaining=Math.max(need-have,0), pct=Math.min(have/need*100,100);
+  const col=remaining===0?"var(--red)":remaining===1?"var(--amber)":"var(--blue)";
+  const txt=remaining===0?"已達標":"再 "+remaining+(label.indexOf('連續')>=0?" 日":" 次");
+  return `<div class="rule"><span class="lbl">${esc(label)}</span>
+     <span class="track"><span class="fill" style="width:${pct}%;background:${col}"></span></span>
+     <span class="rem" style="color:${col}">${txt}</span></div>`;
+}
+function hero(d){
+  const sh=d.self_history||{}, off=d.disposition||{};
+  const consec=sh.consecutive_announced??0, c10=sh.count_10d_k18??0, c30=sh.count_30d_k18??0;
+  let nums=`<div class="nums">
+    <div class="nb"><div class="bignum" style="color:var(--red)">${consec}</div><div class="lab">自算 連續公告(日)</div></div>
+    <div class="nb"><div class="bignum" style="color:var(--amber)">${c30}</div><div class="lab">近30日 款1~8公告(次)</div></div>`;
+  if(off.attention_count!=null)
+    nums+=`<div class="nb"><div class="bignum" style="color:var(--blue)">${off.attention_count}</div><div class="lab">官方累積(次)/最近${off.attention_window??"?"}日</div></div>`;
+  nums+=`</div>`;
+  // 距處置（自算）
+  let rules="";
+  const dist=sh.distance||{};
+  if(dist["連續3個營業日"]!=null) rules+=ruleRow("連續3個營業日",consec,3);
+  if(dist["最近10日內6次"]!=null) rules+=ruleRow("最近10日內6次",c10,6);
+  if(dist["最近30日內12次"]!=null) rules+=ruleRow("最近30日內12次",c30,12);
+  const rulesHtml=rules?`<div class="rules">${rules}</div>`:"";
+  // 投影
+  const proj=sh.projection||{}; const danger=proj.leads_to_disposition_tomorrow;
+  let projHtml=""; const msgs=proj.messages||[];
+  if(msgs.length) projHtml=`<div class="proj ${danger?'warn':''}">`+msgs.map(m=>`<div>• ${esc(m)}</div>`).join("")+`</div>`;
+  // 時間軸
+  let tl="";
+  (sh.recent_days||[]).forEach(x=>{
+    const ks=(x.keys||[]).map(k=>NAMES[k]||k).join(" ");
+    tl+=`<div class="day ${x.announced?'an':''}"><div class="d">${esc(x.date.slice(5))}</div><div class="k">${esc(ks)}</div></div>`;
+  });
+  const tlHtml=tl?`<div style="margin-top:14px;color:var(--mut);font-size:12px">近12營業日自算公告序列：</div><div class="timeline">${tl}</div>`:"";
+  const cav=`<div class="caveat">⚠ 自算次數實算款1-4,9,10,11,13，<b>缺款5-8,12、且未實作跨款除外</b>，連續飆漲股會偏高；方向供預警，確切以官方公告為準。</div>`;
+  return `<div class="hero"><h2>處置進度（自算）</h2>${nums}${rulesHtml}${projHtml}${tlHtml}${cav}</div>`;
+}
+function render(d){
+  if(d.stage==="ERROR"||d.stage==="NO_DATA"){out.innerHTML=`<div class="card"><div class="head">${tag(d.stage)} <b>${esc(d.code)}</b></div><div>${esc(d.headline)}</div></div>`;return;}
+  let h="";
+  h+=`<div class="card"><div class="head">${tag(d.stage)} <b>${esc(d.code)} ${esc(d.name)}</b>
+      <span class="tag t-mut">${esc(d.market_label)}</span>
+      <span style="margin-left:auto;color:var(--mut)">資料截至 ${esc(d.as_of||"-")}</span></div>
+      <div style="margin-top:8px">${esc(d.headline)}</div>`;
+  (d.warnings||[]).forEach(w=>h+=`<div class="warn">⚠ ${esc(w)}</div>`); h+=`</div>`;
+  h+=hero(d);
+  const off=d.disposition&&d.disposition.official;
+  if(off){h+=`<div class="stage-title">官方處置公告</div><div class="card"><b class="crit-trig">已公告處置</b>
+     <table><tr><th>措施</th><td>${esc(off.measures)}</td></tr><tr><th>期間</th><td>${esc(off.period)}</td></tr>
+     <tr><th>原因</th><td>${esc(off.reason)}</td></tr></table></div>`;}
+  h+=`<div class="stage-title">13款判定（今日）</div><div class="card"><table><tr><th>款</th><th>項目</th><th>狀態</th><th>數值</th></tr>`;
+  (d.criteria||[]).forEach(c=>{const st=c.triggered?`<span class="crit-trig">達標</span>`:c.status==="insufficient_data"?`<span class="crit-data">資料不足</span>`:c.status==="excluded"?`<span class="crit-no">除外</span>`:`<span class="crit-no">未達</span>`;
+    h+=`<tr><td>${esc(c.no)}</td><td>${esc(c.name)}</td><td>${st}</td><td class="sc-note">${esc(c.detail)}</td></tr>`;});
+  h+=`</table></div>`;
+  h+=`<div class="stage-title">明日臨界與後果</div>`;
+  if((d.reverse_scenarios||[]).length){h+=`<div class="card"><table><tr><th>款別</th><th>觸發所需條件</th><th>明日可達?</th></tr>`;
+    d.reverse_scenarios.forEach(s=>{const pill=s.reachable_next_day===true?`<span class="pill reach-y">一日內可達</span>`:s.reachable_next_day===false?`<span class="pill reach-n">需連續數日</span>`:`<span class="pill reach-v">看量/當沖</span>`;
+      h+=`<tr><td>${esc(s.title)}</td><td><div>${esc(s.target)}</div><div class="sc-note">${esc(s.note)}</div></td><td>${pill}</td></tr>`;});
+    h+=`</table></div>`;}
+  h+=`<div class="disc">${esc(d.disclaimer||"")}</div>`;
+  out.innerHTML=h;
+}
+$("#go").onclick=()=>query($("#code").value.trim());
+$("#code").addEventListener("keydown",e=>{if(e.key==="Enter")query($("#code").value.trim());});
+document.querySelectorAll(".examples a").forEach(a=>a.onclick=()=>{$("#code").value=a.dataset.c;query(a.dataset.c);});
+</script>
+</body>
+</html>

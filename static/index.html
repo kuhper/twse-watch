@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>台股注意／處置 三階段預判</title>
+<style>
+  :root{--bg:#0f1115;--card:#1a1d24;--bd:#2a2e37;--tx:#e6e8ec;--mut:#9aa0aa;
+        --red:#ff5d5d;--amber:#ffb13d;--green:#36c98a;--blue:#5aa9ff;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--tx);
+       font-family:-apple-system,"Segoe UI","Noto Sans TC",sans-serif;line-height:1.6}
+  .wrap{max-width:860px;margin:0 auto;padding:28px 18px 80px}
+  h1{font-size:22px;margin:0 0 4px} .sub{color:var(--mut);font-size:13px;margin-bottom:20px}
+  .bar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:22px}
+  input,button,select{font-size:16px;border-radius:10px;border:1px solid var(--bd);
+       background:var(--card);color:var(--tx);padding:11px 14px}
+  input{flex:1;min-width:140px} button{cursor:pointer;background:var(--blue);
+       color:#06121f;font-weight:700;border:none} button:disabled{opacity:.5;cursor:wait}
+  .card{background:var(--card);border:1px solid var(--bd);border-radius:14px;
+        padding:16px 18px;margin-bottom:14px}
+  .head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .tag{font-size:12px;padding:3px 9px;border-radius:999px;font-weight:700}
+  .t-red{background:rgba(255,93,93,.16);color:var(--red)}
+  .t-amber{background:rgba(255,177,61,.16);color:var(--amber)}
+  .t-green{background:rgba(54,201,138,.16);color:var(--green)}
+  .t-mut{background:rgba(154,160,170,.16);color:var(--mut)}
+  .stage-title{font-size:12px;letter-spacing:.08em;color:var(--mut);
+       text-transform:uppercase;margin:22px 0 8px;font-weight:700}
+  .headline{font-size:15px;margin:8px 0 0}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:6px}
+  td,th{border-bottom:1px solid var(--bd);padding:7px 6px;text-align:left;vertical-align:top}
+  th{color:var(--mut);font-weight:600}
+  .crit-trig{color:var(--red);font-weight:700}
+  .crit-no{color:var(--mut)} .crit-data{color:#6b7180}
+  .num{font-variant-numeric:tabular-nums}
+  .sc-target{color:var(--tx)} .sc-note{color:var(--mut);font-size:12.5px}
+  .pill{display:inline-block;font-size:11px;padding:1px 7px;border-radius:6px;margin-left:6px}
+  .reach-y{background:rgba(255,93,93,.16);color:var(--red)}
+  .reach-n{background:rgba(54,201,138,.16);color:var(--green)}
+  .disc{color:#7a8088;font-size:12px;margin-top:20px}
+  .warn{color:var(--amber);font-size:13px;margin-top:6px}
+  details summary{cursor:pointer;color:var(--blue);font-size:13px}
+  .kv{color:var(--mut)} .v{color:var(--tx);font-weight:600}
+  .examples{font-size:12px;color:var(--mut);margin-top:6px}
+  .examples a{color:var(--blue);text-decoration:none;margin-right:10px;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>台股注意／處置 三階段預判</h1>
+  <div class="sub">輸入上市／上櫃股票代號，依證交所、櫃買中心官方資料判定注意與處置，並反推臨界數字。</div>
+
+  <div class="bar">
+    <input id="code" placeholder="股票代號，例如 2330" inputmode="numeric" />
+    <select id="months" title="抓取月數">
+      <option value="4">近4月</option>
+      <option value="6" selected>近6月</option>
+      <option value="9">近9月</option>
+    </select>
+    <button id="go">查詢</button>
+  </div>
+  <div class="examples">範例：
+    <a data-c="2330">2330 台積電</a><a data-c="2302">2302 麗正</a><a data-c="2603">2603 長榮</a>
+  </div>
+
+  <div id="out"></div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const out = $("#out");
+
+function tag(stage){
+  const map = {DISPOSED:["處置中／將處置","t-red"],WATCH:["注意觀察","t-amber"],
+    CLEAR:["目前未列","t-green"],NO_DATA:["無資料","t-mut"],ERROR:["錯誤","t-red"],
+    UNKNOWN:["未知","t-mut"]};
+  const [t,c]=map[stage]||[stage,"t-mut"];
+  return `<span class="tag ${c}">${t}</span>`;
+}
+function esc(s){return (s??"").toString().replace(/[&<>]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[m]));}
+
+async function query(code){
+  if(!code) return;
+  $("#go").disabled=true; out.innerHTML=`<div class="card">查詢中… 首次抓取需數秒（向官方逐月抓取日成交）。</div>`;
+  try{
+    const r = await fetch(`/api/query?code=${encodeURIComponent(code)}&months=${$("#months").value}`);
+    render(await r.json());
+  }catch(e){ out.innerHTML=`<div class="card">連線失敗：${esc(e.message)}</div>`; }
+  $("#go").disabled=false;
+}
+
+function render(d){
+  if(d.stage==="ERROR"||d.stage==="NO_DATA"){
+    out.innerHTML=`<div class="card"><div class="head">${tag(d.stage)} <b>${esc(d.code)}</b></div>
+      <div class="headline">${esc(d.headline)}</div></div>`; return;
+  }
+  let h="";
+  // 標頭
+  h+=`<div class="card"><div class="head">${tag(d.stage)}
+      <b>${esc(d.code)} ${esc(d.name)}</b>
+      <span class="tag t-mut">${esc(d.market_label)}</span>
+      <span class="kv" style="margin-left:auto">資料截至 ${esc(d.as_of||"-")}</span></div>
+      <div class="headline">${esc(d.headline)}</div>`;
+  (d.warnings||[]).forEach(w=>h+=`<div class="warn">⚠ ${esc(w)}</div>`);
+  h+=`</div>`;
+
+  // 第一階：官方處置
+  h+=`<div class="stage-title">第一階 · 既成公告</div>`;
+  const off=d.disposition && d.disposition.official;
+  if(off){
+    h+=`<div class="card"><b class="crit-trig">已公告處置</b><table>
+      <tr><th>措施</th><td>${esc(off.measures)}</td></tr>
+      <tr><th>期間</th><td class="num">${esc(off.period)}</td></tr>
+      <tr><th>原因</th><td>${esc(off.reason)}</td></tr></table>
+      <details style="margin-top:8px"><summary>處置條文細節</summary>
+      <div class="sc-note">${esc(off.detail)}</div></details></div>`;
+  }else{
+    h+=`<div class="card sc-note">查無生效中的官方處置公告。${
+      d.disposition&&d.disposition.attention_count!=null
+      ?` 官方注意累積：<span class="v">${d.disposition.attention_count}</span> 次`
+      +(d.disposition.attention_window?`／${d.disposition.attention_window} 個營業日`:""):""}</div>`;
+  }
+
+  // 第二階：規則判定 + 距處置
+  h+=`<div class="stage-title">第二階 · 規則判定（今日踩到哪幾款 · 距處置幾次）</div>`;
+  h+=`<div class="card">`;
+  const dist=d.disposition&&d.disposition.distance_to_disposition||{};
+  if(Object.keys(dist).length){
+    h+=`<table><tr><th>處置規則</th><th>還差幾次注意</th></tr>`;
+    for(const k in dist){const v=dist[k];
+      h+=`<tr><td>${esc(k)}</td><td class="${v<=0?'crit-trig':'num'}">${v<=0?'已達標':('再 '+v+' 次')}</td></tr>`;}
+    h+=`</table>`;
+  }
+  (d.disposition.notes||[]).forEach(n=>h+=`<div class="sc-note">· ${esc(n)}</div>`);
+  // 各款狀態
+  h+=`<table style="margin-top:10px"><tr><th>款別</th><th>項目</th><th>狀態</th><th>數值</th></tr>`;
+  (d.criteria||[]).forEach(c=>{
+    const st = c.triggered?`<span class="crit-trig">達標</span>`
+      : c.status==="insufficient_data"?`<span class="crit-data">資料不足</span>`
+      : c.status==="excluded"?`<span class="crit-no">除外</span>`
+      : `<span class="crit-no">未達</span>`;
+    h+=`<tr><td>${esc(c.no)}</td><td>${esc(c.name)}</td><td>${st}</td>
+        <td class="sc-note">${esc(c.detail)}</td></tr>`;
+  });
+  h+=`</table></div>`;
+
+  // 第三階：反推
+  h+=`<div class="stage-title">第三階 · 反推臨界數字（明日）</div>`;
+  if((d.reverse_scenarios||[]).length){
+    h+=`<div class="card"><table><tr><th>款別</th><th>觸發所需條件</th><th>明日可達?</th></tr>`;
+    d.reverse_scenarios.forEach(s=>{
+      const pill = s.reachable_next_day===true?`<span class="pill reach-y">一日內可達</span>`
+        : s.reachable_next_day===false?`<span class="pill reach-n">需連續數日</span>`
+        : `<span class="pill" style="background:rgba(90,169,255,.16);color:var(--blue)">看量</span>`;
+      h+=`<tr><td>${esc(s.title)}</td>
+          <td><div class="sc-target">${esc(s.target)}</div>
+              <div class="sc-note">${esc(s.note)}</div></td>
+          <td>${pill}</td></tr>`;
+    });
+    h+=`</table></div>`;
+  }else{
+    h+=`<div class="card sc-note">資料不足，無法反推（需至少7個營業日收盤）。</div>`;
+  }
+
+  h+=`<div class="disc">${esc(d.disclaimer||"")}</div>`;
+  out.innerHTML=h;
+}
+
+$("#go").onclick=()=>query($("#code").value.trim());
+$("#code").addEventListener("keydown",e=>{if(e.key==="Enter")query($("#code").value.trim());});
+document.querySelectorAll(".examples a").forEach(a=>a.onclick=()=>{
+  $("#code").value=a.dataset.c; query(a.dataset.c);});
+</script>
+</body>
+</html>
