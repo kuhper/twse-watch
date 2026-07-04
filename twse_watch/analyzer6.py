@@ -93,7 +93,8 @@ def analyze(stock_no: str, months: int = 6) -> dict:
     att = offi.fetch_official_attention(stock_no)
     disps = src.fetch_official_disposition(stock_no)
     import datetime as _dt
-    ongoing = [d for d in disps if d.end and d.end >= _dt.date.today()]
+    # end 為 None 表示日期解析失敗，保守視為仍在處置中
+    ongoing = [d for d in disps if d.end is None or d.end >= _dt.date.today()]
 
     scenarios = reverse(sd.bars, m, t)
     if k13_today and k13_today.get("metrics"):
@@ -128,21 +129,32 @@ def analyze(stock_no: str, months: int = 6) -> dict:
                 "distance_to_disposition": dist, "notes": ["官方注意公告：" + att["text"]]}
     else:
         # 官方無值 → 用自算
-        stage = "WATCH" if today_is_attention or (sc.get("available") and sc["consecutive_announced"] > 0) else "CLEAR"
         sp = sc.get("distance", {})
         proj = {"available": sc.get("available", False), "source": "self",
                 "leads_to_disposition_tomorrow": None, "messages": []}
+        stage = "WATCH" if today_is_attention or (sc.get("available") and sc["consecutive_announced"] > 0) else "CLEAR"
         if sc.get("available") and sp:
             binding, rem = min(sp.items(), key=lambda kv: kv[1])
             proj["binding_rule"], proj["remaining"] = binding, rem
             proj["leads_to_disposition_tomorrow"] = rem <= 1
-            proj["messages"].append("官方即時快照無此檔，改用自算：連續 %d 日、近30日 %d 次；最接近「%s」尚差 %d。"
-                                    % (sc["consecutive_announced"], sc["count_30d_k18"], binding, rem))
-        headline = ("（官方快照暫無此檔，以下為自算）" + (proj["messages"][0] if proj["messages"] else "近期未觸發。"))
+            if rem <= 0:
+                # 自算已超過處置門檻 → 官方公告可能尚未同步至 API
+                stage = "DISPOSED"
+                proj["leads_to_disposition_tomorrow"] = True
+                proj["messages"].append(
+                    "⚠ 自算已達「%s」處置標準（連續 %d 日、近30日 %d 次），"
+                    "官方 API 尚未更新；請至 TWSE/TPEx 官網確認處置公告。"
+                    % (binding, sc["consecutive_announced"], sc["count_30d_k18"]))
+            else:
+                proj["messages"].append("官方即時快照無此檔，改用自算：連續 %d 日、近30日 %d 次；最接近「%s」尚差 %d。"
+                                        % (sc["consecutive_announced"], sc["count_30d_k18"], binding, rem))
+        headline = ("（官方 API 尚未更新，以下為自算）" if stage == "DISPOSED" else "（官方快照暫無此檔，以下為自算）") + \
+                   (proj["messages"][0] if proj["messages"] else "近期未觸發。")
         disp = {"official": None, "attention_count": None, "attention_window": None,
-                "distance_to_disposition": sp, "notes": ["官方即時快照無此檔，改用歷史序列自算。"]}
+                "distance_to_disposition": sp,
+                "notes": ["官方即時快照無此檔，改用歷史序列自算。若顯示 DISPOSED 表示自算超過門檻，仍請以官方公告為準。"]}
 
-    if today_is_attention and stage != "DISPOSED" and proj.get("leads_to_disposition_tomorrow"):
+    if stage != "DISPOSED" and today_is_attention and proj.get("leads_to_disposition_tomorrow"):
         headline += "　⚠ 逼近處置。"
 
     result.update({
