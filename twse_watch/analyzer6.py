@@ -89,46 +89,67 @@ def analyze(stock_no: str, months: int = 6) -> dict:
     triggered = [c for c in crits if c["triggered"]]
     today_is_attention = len(triggered) > 0
 
-    # === 官方注意（即時 RWD + 連續N次解析）===
-    att = offi.fetch_official_attention(stock_no)
-    disps = src.fetch_official_disposition(stock_no)
+    # === 官方注意（權威來源：notice 個股歷史，含各款與計入處置判定）===
     import datetime as _dt
+    disps = src.fetch_official_disposition(stock_no)
     # end 為 None 表示日期解析失敗，保守視為仍在處置中
     ongoing = [d for d in disps if d.end is None or d.end >= _dt.date.today()]
+
+    # 官方個股注意歷史（截圖那個查詢頁的後端）+ 計入處置進度
+    ahist = offi.fetch_attention_history(stock_no) if sd.market == "TWSE" else None
+    trading_dates = [b.date for b in sd.bars]
+    ap = offi.disposition_progress(ahist["entries"], trading_dates) if ahist else {"available": False}
 
     scenarios = reverse(sd.bars, m, t)
     if k13_today and k13_today.get("metrics"):
         scenarios.append(_k13_scenario(k13_today, k13_next))
 
-    # 歷史序列自算（作為官方缺值時的後備與交叉比對）
+    # 歷史序列自算（官方注意端點無法涵蓋時的後備，例如上櫃）
     hist = announcement_history(sd.bars, stock_no, shares, market=sd.market, lookback=30, k13_lookback=10)
     sc = self_counts(hist)
 
-    notes = []
+    latest_att = ahist["entries"][-1] if (ahist and ahist["entries"]) else None
+
     if ongoing:
+        # 官方已正式公告處置
         d = max(ongoing, key=lambda x: x.end)
         stage = "DISPOSED"
         headline = "已公告處置：%s，處置期間 %s（原因：%s）。" % (d.measures, d.period, d.reason)
         disp = {"official": {"reason": d.reason, "period": d.period, "measures": d.measures,
                              "start": d.start.isoformat() if d.start else None,
                              "end": d.end.isoformat() if d.end else None, "detail": d.detail[:400]},
-                "attention_count": att["count"] if att else None,
-                "attention_window": att["window"] if att else None,
-                "attention_text": att["text"] if att else None,
-                "distance_to_disposition": {}, "notes": ["處置時間已明確。"]}
+                "attention_progress": ap,
+                "distance_to_disposition": ap.get("distance", {}), "notes": ["處置時間已明確。"]}
         proj = {"available": True, "leads_to_disposition_tomorrow": True, "messages": ["已處於官方處置期間。"]}
-    elif att and att["count"] is not None:
-        dist = offi.distance_to_disposition(att["count"], att["window"], att["consecutive"])
-        proj = _official_projection(att["count"], att["window"], att["consecutive"], dist, today_is_attention)
-        stage = "WATCH"
-        headline = ("官方注意累計 %d 次%s（%s）；%s"
-                    % (att["count"], ("／最近 %s 個營業日" % att["window"] if att["window"] else ""),
-                       att["text"], (proj["messages"][0] if proj["messages"] else "")))
-        disp = {"official": None, "attention_count": att["count"], "attention_window": att["window"],
-                "attention_text": att["text"], "consecutive": att["consecutive"],
-                "distance_to_disposition": dist, "notes": ["官方注意公告：" + att["text"]]}
+
+    elif ap.get("available"):
+        # 有官方注意歷史 → 用計入處置款別數距離
+        binding, rem = ap["binding_rule"], ap["remaining"]
+        proj = {"available": True, "source": "official_notice", "binding_rule": binding,
+                "remaining": rem, "leads_to_disposition_tomorrow": rem <= 1, "messages": []}
+        base = ("官方注意：近期共 %d 天列注意，其中**計入處置** %d 天"
+                "（連續 %d 日／近10日 %d 次／近30日 %d 次）。"
+                % (ap["official_cum_attention"], ap["dispo_counting_days"],
+                   ap["consecutive_dispo_days"], ap["count_10d"], ap["count_30d"]))
+        if rem <= 0:
+            stage = "DISPOSED"
+            proj["leads_to_disposition_tomorrow"] = True
+            proj["messages"].append(
+                "⚠ 已達「%s」處置標準；官方 punish 公告可能尚未同步至 API，請至 TWSE 官網確認。" % binding)
+        else:
+            stage = "WATCH"
+            proj["messages"].append(
+                "最接近門檻「%s」，再被列注意（計入處置款別）%d 次即達標。" % (binding, rem))
+        headline = base + proj["messages"][0]
+        disp = {"official": None, "attention_progress": ap,
+                "latest_attention": (latest_att["text"] if latest_att else None),
+                "latest_attention_date": (latest_att["date_str"] if latest_att else None),
+                "distance_to_disposition": ap["distance"],
+                "notes": ["資料來源：官方個股注意歷史（notice 端點）。"
+                          "距離只計入第 1~8 款；第 9~13 款（紅字）依規定不計入處置。"]}
+
     else:
-        # 官方無值 → 用自算
+        # 官方注意端點無資料（例如上櫃、或近期未列注意）→ 退回自算
         sp = sc.get("distance", {})
         proj = {"available": sc.get("available", False), "source": "self",
                 "leads_to_disposition_tomorrow": None, "messages": []}
@@ -138,7 +159,6 @@ def analyze(stock_no: str, months: int = 6) -> dict:
             proj["binding_rule"], proj["remaining"] = binding, rem
             proj["leads_to_disposition_tomorrow"] = rem <= 1
             if rem <= 0:
-                # 自算已超過處置門檻 → 官方公告可能尚未同步至 API
                 stage = "DISPOSED"
                 proj["leads_to_disposition_tomorrow"] = True
                 proj["messages"].append(
@@ -146,13 +166,13 @@ def analyze(stock_no: str, months: int = 6) -> dict:
                     "官方 API 尚未更新；請至 TWSE/TPEx 官網確認處置公告。"
                     % (binding, sc["consecutive_announced"], sc["count_30d_k18"]))
             else:
-                proj["messages"].append("官方即時快照無此檔，改用自算：連續 %d 日、近30日 %d 次；最接近「%s」尚差 %d。"
+                proj["messages"].append("官方注意端點無此檔，改用自算：連續 %d 日、近30日 %d 次；最接近「%s」尚差 %d。"
                                         % (sc["consecutive_announced"], sc["count_30d_k18"], binding, rem))
-        headline = ("（官方 API 尚未更新，以下為自算）" if stage == "DISPOSED" else "（官方快照暫無此檔，以下為自算）") + \
+        headline = ("（官方 API 尚未更新，以下為自算）" if stage == "DISPOSED" else "（官方注意端點暫無此檔，以下為自算）") + \
                    (proj["messages"][0] if proj["messages"] else "近期未觸發。")
-        disp = {"official": None, "attention_count": None, "attention_window": None,
+        disp = {"official": None, "attention_progress": None,
                 "distance_to_disposition": sp,
-                "notes": ["官方即時快照無此檔，改用歷史序列自算。若顯示 DISPOSED 表示自算超過門檻，仍請以官方公告為準。"]}
+                "notes": ["官方注意端點無此檔，改用歷史序列自算（上櫃或近期未列注意常見）。"]}
 
     if stage != "DISPOSED" and today_is_attention and proj.get("leads_to_disposition_tomorrow"):
         headline += "　⚠ 逼近處置。"
