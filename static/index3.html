@@ -83,34 +83,52 @@ function ruleRow(label,have,need){
      <span class="track"><span class="fill" style="width:${pct}%;background:${col}"></span></span>
      <span class="rem" style="color:${col}">${txt}</span></div>`;
 }
+function heroOfficial(d,ap){
+  // 官方注意歷史（notice 端點）— 權威來源
+  const proj=d.disposition_projection||{}; const danger=proj.leads_to_disposition_tomorrow;
+  const nums=`<div class="nums">
+    <div class="nb"><div class="bignum" style="color:var(--blue)">${ap.official_cum_attention}</div><div class="lab">官方注意(天，全部款)</div></div>
+    <div class="nb"><div class="bignum" style="color:var(--amber)">${ap.dispo_counting_days}</div><div class="lab">計入處置(天，款1~8)</div></div>
+    <div class="nb"><div class="bignum" style="color:${ap.consecutive_dispo_days>=3?'var(--red)':'var(--amber)'}">${ap.consecutive_dispo_days}</div><div class="lab">連續計入處置(日)</div></div>
+  </div>`;
+  let rules="";
+  rules+=ruleRow("連續3個營業日",ap.consecutive_dispo_days,3);
+  rules+=ruleRow("最近10日內6次",ap.count_10d,6);
+  rules+=ruleRow("最近30日內12次",ap.count_30d,12);
+  const rulesHtml=`<div class="rules">${rules}</div>`;
+  let projHtml=""; const msgs=proj.messages||[];
+  if(msgs.length) projHtml=`<div class="proj ${danger?'warn':''}">`+msgs.map(m=>`<div>• ${esc(m)}</div>`).join("")+`</div>`;
+  const off=d.disposition||{};
+  let latest="";
+  if(off.latest_attention) latest=`<div style="margin-top:12px;color:var(--mut);font-size:12px">最新官方注意（${esc(off.latest_attention_date||"")}）：</div><div class="proj">${esc(off.latest_attention)}</div>`;
+  const cav=`<div class="caveat">資料來源：<b>證交所官方個股注意歷史</b>。距處置只計入第 1~8 款；第 9~13 款（紅字）依規定不計入處置。連續/累計達標即列 DISPOSED，官方 punish 公告或有數小時延遲，確切以官網為準。</div>`;
+  return `<div class="hero"><h2>處置進度（官方注意）</h2>${nums}${rulesHtml}${projHtml}${latest}${cav}</div>`;
+}
 function hero(d){
-  const sh=d.self_history||{}, off=d.disposition||{};
+  const ap=(d.disposition||{}).attention_progress;
+  if(ap&&ap.available) return heroOfficial(d,ap);
+  // ── 官方注意端點無資料（上櫃/近期未列）→ 退回自算 ──
+  const sh=d.self_history||{};
   const consec=sh.consecutive_announced??0, c10=sh.count_10d_k18??0, c30=sh.count_30d_k18??0;
   let nums=`<div class="nums">
     <div class="nb"><div class="bignum" style="color:var(--red)">${consec}</div><div class="lab">自算 連續公告(日)</div></div>
-    <div class="nb"><div class="bignum" style="color:var(--amber)">${c30}</div><div class="lab">近30日 款1~8公告(次)</div></div>`;
-  if(off.attention_count!=null)
-    nums+=`<div class="nb"><div class="bignum" style="color:var(--blue)">${off.attention_count}</div><div class="lab">官方累積(次)/最近${off.attention_window??"?"}日</div></div>`;
-  nums+=`</div>`;
-  // 距處置（自算）
+    <div class="nb"><div class="bignum" style="color:var(--amber)">${c30}</div><div class="lab">近30日 款1~8公告(次)</div></div></div>`;
   let rules="";
   const dist=sh.distance||{};
   if(dist["連續3個營業日"]!=null) rules+=ruleRow("連續3個營業日",consec,3);
   if(dist["最近10日內6次"]!=null) rules+=ruleRow("最近10日內6次",c10,6);
   if(dist["最近30日內12次"]!=null) rules+=ruleRow("最近30日內12次",c30,12);
   const rulesHtml=rules?`<div class="rules">${rules}</div>`:"";
-  // 投影
-  const proj=sh.projection||{}; const danger=proj.leads_to_disposition_tomorrow;
+  const proj=d.disposition_projection||sh.projection||{}; const danger=proj.leads_to_disposition_tomorrow;
   let projHtml=""; const msgs=proj.messages||[];
   if(msgs.length) projHtml=`<div class="proj ${danger?'warn':''}">`+msgs.map(m=>`<div>• ${esc(m)}</div>`).join("")+`</div>`;
-  // 時間軸
   let tl="";
   (sh.recent_days||[]).forEach(x=>{
     const ks=(x.keys||[]).map(k=>NAMES[k]||k).join(" ");
     tl+=`<div class="day ${x.announced?'an':''}"><div class="d">${esc(x.date.slice(5))}</div><div class="k">${esc(ks)}</div></div>`;
   });
   const tlHtml=tl?`<div style="margin-top:14px;color:var(--mut);font-size:12px">近12營業日自算公告序列：</div><div class="timeline">${tl}</div>`:"";
-  const cav=`<div class="caveat">⚠ 自算次數實算款1-4,9,10,11,13，<b>缺款5-8,12、且未實作跨款除外</b>，連續飆漲股會偏高；方向供預警，確切以官方公告為準。</div>`;
+  const cav=`<div class="caveat">⚠ 官方注意端點暫無此檔（上櫃或近期未列注意），以下為自算：實算款1-4,9,10,11,13，<b>缺款5-8,12</b>，連續飆漲股會偏高；方向供預警，確切以官方公告為準。</div>`;
   return `<div class="hero"><h2>處置進度（自算）</h2>${nums}${rulesHtml}${projHtml}${tlHtml}${cav}</div>`;
 }
 function render(d){
